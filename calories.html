@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CalTrack</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<!-- Firebase Compat SDK (ไม่ใช้ ES module) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<style>
+  :root {
+    --navy: #003049; --red: #D62828; --orange: #F77F00;
+    --yellow: #FCBF49; --cream: #EAE2B7;
+    --bg: #f5f0e0; --surface: #fff;
+    --border: rgba(0,48,73,0.12); --text: #1a1a1a; --muted: #8a7f6e;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-serif; min-height: 100vh; }
+
+  #loadingOverlay { position: fixed; inset: 0; background: var(--navy); display: flex; align-items: center; justify-content: center; z-index: 999; flex-direction: column; gap: 16px; }
+  .logo-big { font-family: 'Bebas Neue', cursive; font-size: 64px; color: var(--yellow); letter-spacing: 4px; }
+  .logo-big span { color: var(--orange); }
+  .spinner { width: 32px; height: 32px; border: 3px solid rgba(252,191,73,0.2); border-top-color: var(--yellow); border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .topbar { background: var(--navy); padding: 14px 20px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 12px rgba(0,0,0,0.2); }
+  .logo { font-family: 'Bebas Neue', cursive; font-size: 28px; color: var(--yellow); letter-spacing: 2px; }
+  .logo span { color: var(--orange); }
+  .sync-badge { font-family: 'DM Mono', monospace; font-size: 10px; color: rgba(234,226,183,0.6); background: rgba(255,255,255,0.07); border: 1px solid rgba(234,226,183,0.15); padding: 4px 10px; border-radius: 20px; display: flex; align-items: center; gap: 5px; }
+  .sync-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--yellow); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  .app { max-width: 980px; margin: 0 auto; padding: 16px 14px 80px; }
+  .date-strip { font-family: 'DM Mono', monospace; font-size: 11px; color: var(--muted); text-align: center; padding: 8px 0 2px; letter-spacing: 1px; }
+
+  .tabs { display: flex; gap: 3px; margin: 10px 0 16px; background: var(--navy); border-radius: 10px; padding: 4px; }
+  .tab { flex: 1; padding: 10px 4px; border: none; border-radius: 7px; background: transparent; color: rgba(234,226,183,0.5); font-family: 'DM Sans', sans-serif; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .tab.active { background: var(--orange); color: #fff; }
+
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  .card { background: var(--surface); border: 1.5px solid var(--border); border-radius: 14px; padding: 18px; margin-bottom: 12px; box-shadow: 0 2px 10px rgba(0,48,73,0.06); }
+  .card-title { font-size: 10px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: var(--orange); margin-bottom: 14px; border-bottom: 2px solid var(--cream); padding-bottom: 8px; }
+
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .form-group { display: flex; flex-direction: column; gap: 5px; }
+  .form-group label { font-size: 10px; font-weight: 700; color: var(--navy); letter-spacing: 1px; text-transform: uppercase; }
+  .form-group input, .form-group select { background: var(--bg); border: 1.5px solid var(--border); border-radius: 8px; color: var(--text); font-family: 'DM Mono', monospace; font-size: 13px; padding: 10px 12px; outline: none; transition: border-color 0.2s; width: 100%; }
+  .form-group input:focus, .form-group select:focus { border-color: var(--orange); }
+
+  .btn { border: none; border-radius: 8px; cursor: pointer; font-family: 'DM Sans', sans-serif; font-weight: 700; font-size: 13px; padding: 12px 20px; transition: all 0.2s; }
+  .btn-primary { background: var(--orange); color: #fff; }
+  .btn-primary:hover { background: var(--red); }
+  .btn-navy { background: var(--navy); color: var(--yellow); }
+  .btn-full { width: 100%; margin-top: 12px; }
+  .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+  .prediction-box { background: var(--navy); border-radius: 14px; padding: 22px; margin-bottom: 12px; text-align: center; }
+  .prediction-days { font-family: 'Bebas Neue', cursive; font-size: 80px; color: var(--yellow); line-height: 1; }
+  .prediction-label { font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: rgba(234,226,183,0.45); margin: 2px 0 8px; }
+  .prediction-detail { font-family: 'DM Mono', monospace; font-size: 11px; color: rgba(234,226,183,0.65); }
+  .prediction-date { font-size: 14px; color: var(--orange); font-weight: 700; margin-top: 8px; }
+
+  .stats-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; margin-bottom: 14px; }
+  .stat-box { background: var(--bg); border: 1.5px solid var(--border); border-radius: 10px; padding: 12px 8px; text-align: center; }
+  .stat-val { font-family: 'Bebas Neue', cursive; font-size: 28px; line-height: 1; margin-bottom: 2px; color: var(--navy); }
+  .stat-val.over { color: var(--red); }
+  .stat-val.under { color: var(--orange); }
+  .stat-lbl { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+
+  .net-bar-label { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); margin-bottom: 5px; font-family: 'DM Mono', monospace; }
+  .net-bar-bg { height: 10px; background: var(--bg); border-radius: 5px; overflow: hidden; border: 1.5px solid var(--border); }
+  .net-bar-fill { height: 100%; border-radius: 5px; transition: width 0.5s; }
+
+  .macro-stats { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; margin-bottom: 14px; }
+  .macro-box { background: var(--bg); border-radius: 10px; padding: 10px; text-align: center; border: 1.5px solid var(--border); }
+  .macro-box .mval { font-family: 'Bebas Neue', cursive; font-size: 22px; line-height: 1; }
+  .macro-box .mlbl { font-size: 9px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
+  .macro-bars { display: flex; flex-direction: column; gap: 8px; }
+  .macro-row { display: flex; align-items: center; gap: 8px; }
+  .macro-name { font-size: 10px; font-weight: 700; width: 56px; text-transform: uppercase; }
+  .macro-track { flex: 1; height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; border: 1px solid var(--border); }
+  .macro-fill { height: 100%; border-radius: 3px; transition: width 0.5s; }
+  .macro-val { font-family: 'DM Mono', monospace; font-size: 10px; color: var(--muted); min-width: 36px; text-align: right; }
+
+  .meal-item { display: flex; align-items: center; justify-content: space-between; padding: 11px 13px; background: var(--bg); border-radius: 10px; margin-bottom: 8px; border: 1.5px solid var(--border); gap: 8px; }
+  .meal-left { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+  .meal-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .meal-dot.intake { background: var(--orange); }
+  .meal-dot.outtake { background: var(--red); }
+  .meal-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .meal-macros { font-size: 10px; color: var(--muted); font-family: 'DM Mono', monospace; margin-top: 1px; }
+  .meal-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+  .meal-cal { font-family: 'Bebas Neue', cursive; font-size: 22px; }
+  .meal-cal.intake { color: var(--orange); }
+  .meal-cal.outtake { color: var(--red); }
+  .del-btn { background: transparent; border: 1px solid rgba(214,40,40,0.3); color: var(--red); font-size: 10px; padding: 5px 8px; border-radius: 5px; cursor: pointer; }
+  .del-btn:hover { background: var(--red); color: #fff; }
+  .empty-state { text-align: center; padding: 28px; color: var(--muted); font-size: 13px; line-height: 1.8; }
+
+  .chart-controls { display: flex; gap: 6px; margin-bottom: 12px; }
+  .chart-btn { border: 1.5px solid var(--border); background: var(--bg); color: var(--muted); padding: 6px 16px; border-radius: 6px; cursor: pointer; font-family: 'DM Sans', sans-serif; font-size: 12px; font-weight: 600; transition: all 0.2s; }
+  .chart-btn.active { border-color: var(--navy); color: var(--navy); background: var(--yellow); }
+  .chart-wrap { position: relative; height: 260px; }
+
+  #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(80px); background: var(--navy); color: var(--yellow); padding: 10px 22px; border-radius: 20px; font-size: 13px; font-weight: 600; z-index: 9999; transition: transform 0.3s; white-space: nowrap; border: 1px solid rgba(252,191,73,0.3); pointer-events: none; }
+  #toast.show { transform: translateX(-50%) translateY(0); }
+
+  .warning-card { border-color: rgba(214,40,40,0.3) !important; background: rgba(214,40,40,0.04) !important; text-align: center; padding: 16px; font-size: 13px; }
+
+  @media(max-width:600px) {
+    .stats-grid { grid-template-columns: 1fr 1fr; }
+    .form-grid { grid-template-columns: 1fr; }
+    .prediction-days { font-size: 60px; }
+  }
+</style>
+</head>
+<body>
+
+<div id="loadingOverlay">
+  <div class="logo-big">Cal<span>Track</span></div>
+  <div class="spinner"></div>
+</div>
+
+<div id="mainApp" style="display:none">
+  <div class="topbar">
+    <div class="logo">Cal<span>Track</span></div>
+    <div class="sync-badge"><div class="sync-dot"></div>Firebase Sync</div>
+  </div>
+  <div class="app">
+    <div class="date-strip" id="currentDate"></div>
+    <div class="tabs" style="margin-top:10px">
+      <button class="tab active" data-tab="dashboard">📊 Dashboard</button>
+      <button class="tab" data-tab="log">🍽 บันทึก</button>
+      <button class="tab" data-tab="settings">⚙️ ตั้งค่า</button>
+      <button class="tab" data-tab="graph">📈 กราฟ</button>
+    </div>
+
+    <!-- DASHBOARD -->
+    <div id="panel-dashboard" class="panel active">
+      <div id="no-settings-warning" class="card warning-card" style="display:none">
+        ⚙️ <strong>กรุณาตั้งค่า Settings ก่อน</strong><br>
+        <span style="font-size:12px;color:var(--muted)">เพื่อคำนวณ TDEE และ Prediction</span>
+      </div>
+      <div class="prediction-box">
+        <div class="prediction-days" id="predDays">—</div>
+        <div class="prediction-label">วัน เพื่อถึง Target Weight</div>
+        <div class="prediction-detail" id="predDetail">กรุณาตั้งค่า Settings ก่อน</div>
+        <div class="prediction-date" id="predDate"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">🔥 สรุปวันนี้</div>
+        <div class="stats-grid">
+          <div class="stat-box"><div class="stat-val" id="todayIntake" style="color:var(--orange)">0</div><div class="stat-lbl">Intake kcal</div></div>
+          <div class="stat-box"><div class="stat-val" id="todayOuttake" style="color:var(--red)">0</div><div class="stat-lbl">Outtake kcal</div></div>
+          <div class="stat-box"><div class="stat-val" id="todayNet" style="color:var(--navy)">0</div><div class="stat-lbl">Net kcal</div></div>
+          <div class="stat-box"><div class="stat-val" id="todayBalance">0</div><div class="stat-lbl">vs TDEE</div></div>
+        </div>
+        <div class="net-bar-label"><span>Net vs TDEE</span><span id="netBarLabel">0 / 0 kcal</span></div>
+        <div class="net-bar-bg"><div class="net-bar-fill" id="netBar" style="width:0%;background:var(--navy)"></div></div>
+      </div>
+      <div class="card">
+        <div class="card-title">🧬 Macros วันนี้</div>
+        <div class="macro-stats">
+          <div class="macro-box"><div class="mval" style="color:var(--red)" id="todayProtein">0g</div><div class="mlbl">Protein</div></div>
+          <div class="macro-box"><div class="mval" style="color:var(--orange)" id="todayCarbs">0g</div><div class="mlbl">Carbs</div></div>
+          <div class="macro-box"><div class="mval" style="color:var(--yellow)" id="todayFat">0g</div><div class="mlbl">Fat</div></div>
+          <div class="macro-box"><div class="mval" style="color:var(--muted)" id="todayMacrosCal">0</div><div class="mlbl">kcal</div></div>
+        </div>
+        <div class="macro-bars">
+          <div class="macro-row"><div class="macro-name" style="color:var(--red)">Protein</div><div class="macro-track"><div class="macro-fill" id="barProtein" style="background:var(--red);width:0%"></div></div><div class="macro-val" id="valProtein">0g</div></div>
+          <div class="macro-row"><div class="macro-name" style="color:var(--orange)">Carbs</div><div class="macro-track"><div class="macro-fill" id="barCarbs" style="background:var(--orange);width:0%"></div></div><div class="macro-val" id="valCarbs">0g</div></div>
+          <div class="macro-row"><div class="macro-name" style="color:var(--yellow)">Fat</div><div class="macro-track"><div class="macro-fill" id="barFat" style="background:var(--yellow);width:0%"></div></div><div class="macro-val" id="valFat">0g</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- LOG -->
+    <div id="panel-log" class="panel">
+      <div class="card">
+        <div class="card-title">🍽 เพิ่มมื้ออาหาร</div>
+        <div class="form-group" style="margin-bottom:10px">
+          <label>ชื่อมื้ออาหาร</label>
+          <input type="text" id="mealName" placeholder="เช่น ข้าวมันไก่, วิ่ง 5km">
+        </div>
+        <div class="form-grid" style="margin-bottom:10px">
+          <div class="form-group">
+            <label>ประเภท</label>
+            <select id="mealType">
+              <option value="intake">🍴 Intake (กิน)</option>
+              <option value="outtake">🔥 Outtake (ออก)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Calories (kcal)</label>
+            <input type="number" id="mealCal" placeholder="0" min="0">
+          </div>
+        </div>
+        <div id="macroFields">
+          <div class="form-grid">
+            <div class="form-group"><label>Protein (g)</label><input type="number" id="mealProtein" placeholder="0" min="0"></div>
+            <div class="form-group"><label>Carbs (g)</label><input type="number" id="mealCarbs" placeholder="0" min="0"></div>
+            <div class="form-group"><label>Fat (g)</label><input type="number" id="mealFat" placeholder="0" min="0"></div>
+          </div>
+        </div>
+        <button class="btn btn-primary btn-full" id="addMealBtn">+ เพิ่มมื้ออาหาร</button>
+      </div>
+      <div class="card">
+        <div class="card-title">📋 รายการวันนี้</div>
+        <div id="mealList"><div class="empty-state">ยังไม่มีรายการวันนี้</div></div>
+      </div>
+    </div>
+
+    <!-- SETTINGS -->
+    <div id="panel-settings" class="panel">
+      <div class="card">
+        <div class="card-title">📏 Body Baseline</div>
+        <div class="form-grid">
+          <div class="form-group"><label>Weight (kg)</label><input type="number" id="bodyWeight" placeholder="80" step="0.1"></div>
+          <div class="form-group"><label>Height (cm)</label><input type="number" id="bodyHeight" placeholder="175"></div>
+          <div class="form-group"><label>Age (ปี)</label><input type="number" id="bodyAge" placeholder="28"></div>
+          <div class="form-group">
+            <label>Gender</label>
+            <select id="bodyGender"><option value="male">Male</option><option value="female">Female</option></select>
+          </div>
+          <div class="form-group"><label>TDEE (kcal/วัน)</label><input type="number" id="tdee" placeholder="คำนวณอัตโนมัติ"></div>
+          <div class="form-group"><label>Target Weight (kg)</label><input type="number" id="targetWeight" placeholder="70" step="0.1"></div>
+        </div>
+        <button class="btn btn-navy btn-full" id="saveSettingsBtn">💾 บันทึก Settings</button>
+      </div>
+      <div class="card" id="bmrCard" style="display:none">
+        <div class="card-title">🧮 Calculated Values</div>
+        <div class="stats-grid" style="grid-template-columns:1fr 1fr 1fr">
+          <div class="stat-box"><div class="stat-val" id="calcBMR" style="color:var(--orange)">—</div><div class="stat-lbl">BMR kcal</div></div>
+          <div class="stat-box"><div class="stat-val" id="calcBMI" style="color:var(--navy)">—</div><div class="stat-lbl">BMI</div></div>
+          <div class="stat-box"><div class="stat-val" id="calcTDEE" style="color:var(--red)">—</div><div class="stat-lbl">TDEE kcal</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- GRAPH -->
+    <div id="panel-graph" class="panel">
+      <div class="card">
+        <div class="card-title">📊 Intake vs Outtake</div>
+        <div class="chart-controls">
+          <button class="chart-btn active" data-range="7">7 วัน</button>
+          <button class="chart-btn" data-range="14">14 วัน</button>
+        </div>
+        <div class="chart-wrap"><canvas id="mainChart"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-title">🧬 Macro Breakdown</div>
+        <div class="chart-wrap" style="height:220px"><canvas id="macroChart"></canvas></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyBgdHWs8hD01uyjV_VvKTqhi6FBjsj5OJw",
+  authDomain: "calorieztracker.firebaseapp.com",
+  projectId: "calorieztracker",
+  databaseURL: "https://calorieztracker-default-rtdb.asia-southeast1.firebasedatabase.app",
+  storageBucket: "calorieztracker.firebasestorage.app",
+  messagingSenderId: "5969386780",
+  appId: "1:5969386780:web:4bee02e1284bd84e602ed9"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+const ROOT = "users/owner";
+
+let settings = {};
+let logs = {};
+let currentChart = null;
+let macroChart = null;
+let chartRange = 7;
+
+const todayKey = () => new Date().toISOString().slice(0,10);
+const $ = id => document.getElementById(id);
+
+function showToast(msg) {
+  const t = $('toast'); t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2200);
+}
+function getLastNDays(n) {
+  return Array.from({length:n}, (_,i) => {
+    const d = new Date(); d.setDate(d.getDate() - (n-1-i));
+    return d.toISOString().slice(0,10);
+  });
+}
+
+// ── FIREBASE ──
+async function loadSettings() {
+  const snap = await db.ref(ROOT + '/settings').once('value');
+  if (snap.exists()) { settings = snap.val(); loadSettingsUI(); }
+}
+async function saveSettingsDB() {
+  await db.ref(ROOT + '/settings').set(settings);
+}
+async function loadLogs() {
+  logs = {};
+  const snap = await db.ref(ROOT + '/meals').once('value');
+  if (snap.exists()) {
+    const data = snap.val();
+    Object.entries(data).forEach(([key, meal]) => {
+      if (!logs[meal.date]) logs[meal.date] = [];
+      logs[meal.date].push({ ...meal, id: key });
+    });
+  }
+}
+async function addMealDB(meal) {
+  const ref = db.ref(ROOT + '/meals').push();
+  await ref.set(meal);
+  return ref.key;
+}
+async function deleteMealDB(id) {
+  await db.ref(ROOT + '/meals/' + id).remove();
+}
+
+// ── INIT ──
+(async () => {
+  try {
+    await loadSettings();
+    await loadLogs();
+  } catch(e) {
+    console.error('Firebase error:', e);
+  }
+  $('loadingOverlay').style.display = 'none';
+  $('mainApp').style.display = 'block';
+  renderMealList();
+  updateDashboard();
+})();
+
+// ── TABS ──
+document.querySelectorAll('.tab').forEach(btn => {
+  btn.onclick = () => {
+    const tab = btn.dataset.tab;
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    $('panel-' + tab).classList.add('active');
+    if (tab === 'graph') renderCharts();
+    if (tab === 'dashboard') updateDashboard();
+    if (tab === 'settings') loadSettingsUI();
+  };
+});
+
+// ── SETTINGS ──
+function loadSettingsUI() {
+  if (settings.weight) $('bodyWeight').value = settings.weight;
+  if (settings.height) $('bodyHeight').value = settings.height;
+  if (settings.age)    $('bodyAge').value    = settings.age;
+  if (settings.gender) $('bodyGender').value = settings.gender;
+  if (settings.tdee)   $('tdee').value       = settings.tdee;
+  if (settings.targetWeight) $('targetWeight').value = settings.targetWeight;
+}
+
+$('saveSettingsBtn').onclick = async () => {
+  const w = parseFloat($('bodyWeight').value);
+  const h = parseFloat($('bodyHeight').value);
+  const age = parseInt($('bodyAge').value);
+  const gender = $('bodyGender').value;
+  let tdeeVal = parseFloat($('tdee').value);
+  const target = parseFloat($('targetWeight').value);
+  let bmr = 0;
+  if (w && h && age) {
+    bmr = gender === 'male' ? 10*w+6.25*h-5*age+5 : 10*w+6.25*h-5*age-161;
+    if (!tdeeVal) tdeeVal = Math.round(bmr * 1.55);
+  }
+  settings = { weight:w, height:h, age, gender, tdee:tdeeVal, targetWeight:target };
+  const btn = $('saveSettingsBtn');
+  btn.textContent = 'กำลังบันทึก...'; btn.disabled = true;
+  await saveSettingsDB();
+  btn.textContent = '💾 บันทึก Settings'; btn.disabled = false;
+  if (bmr) {
+    $('bmrCard').style.display = 'block';
+    $('calcBMR').textContent  = Math.round(bmr);
+    $('calcTDEE').textContent = Math.round(tdeeVal);
+    $('calcBMI').textContent  = (w/((h/100)**2)).toFixed(1);
+    $('tdee').value = Math.round(tdeeVal);
+  }
+  showToast('✅ บันทึก Settings แล้ว!');
+  updateDashboard();
+};
+
+// ── LOG MEALS ──
+$('mealType').onchange = function() {
+  $('macroFields').style.display = this.value === 'outtake' ? 'none' : 'block';
+};
+
+$('addMealBtn').onclick = async () => {
+  const name = $('mealName').value.trim();
+  const type = $('mealType').value;
+  const cal  = parseFloat($('mealCal').value) || 0;
+  if (!name || !cal) { alert('กรอกชื่อและ Calories ด้วยนะ!'); return; }
+  const protein = type==='intake' ? (parseFloat($('mealProtein').value)||0) : 0;
+  const carbs   = type==='intake' ? (parseFloat($('mealCarbs').value)||0)   : 0;
+  const fat     = type==='intake' ? (parseFloat($('mealFat').value)||0)     : 0;
+  const btn = $('addMealBtn');
+  btn.textContent = 'กำลังบันทึก...'; btn.disabled = true;
+  const today = todayKey();
+  const meal = { name, type, cal, protein, carbs, fat, date: today, time: new Date().toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'}) };
+  const id = await addMealDB(meal);
+  meal.id = id;
+  if (!logs[today]) logs[today] = [];
+  logs[today].push(meal);
+  ['mealName','mealCal','mealProtein','mealCarbs','mealFat'].forEach(i => $(i).value = '');
+  btn.textContent = '+ เพิ่มมื้ออาหาร'; btn.disabled = false;
+  renderMealList(); updateDashboard(); showToast('✅ บันทึกแล้ว!');
+};
+
+function deleteMeal(id, date) {
+  deleteMealDB(id).then(() => {
+    logs[date] = (logs[date]||[]).filter(m => m.id !== id);
+    renderMealList(); updateDashboard(); showToast('ลบแล้ว');
+  });
+}
+
+function renderMealList() {
+  const meals = logs[todayKey()] || [];
+  const list  = $('mealList');
+  if (!meals.length) {
+    list.innerHTML = '<div class="empty-state">ยังไม่มีรายการวันนี้<br><small style="opacity:.6">เพิ่มมื้ออาหารด้านบน</small></div>';
+    return;
+  }
+  list.innerHTML = meals.map(m => `
+    <div class="meal-item">
+      <div class="meal-left">
+        <span class="meal-dot ${m.type}"></span>
+        <div>
+          <div class="meal-name">${m.name}</div>
+          <div class="meal-macros">${m.type==='intake'?`P ${m.protein}g · C ${m.carbs}g · F ${m.fat}g`:m.time}</div>
+        </div>
+      </div>
+      <div class="meal-right">
+        <span class="meal-cal ${m.type}">${m.type==='outtake'?'-':'+'}${m.cal}</span>
+        <button class="del-btn" onclick="deleteMeal('${m.id}','${m.date}')">✕</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ── DASHBOARD ──
+function getTodayTotals() {
+  const meals = logs[todayKey()] || [];
+  let intake=0,outtake=0,protein=0,carbs=0,fat=0;
+  meals.forEach(m => {
+    if(m.type==='intake'){intake+=m.cal;protein+=m.protein;carbs+=m.carbs;fat+=m.fat;}
+    else outtake+=m.cal;
+  });
+  return {intake,outtake,net:intake-outtake,protein,carbs,fat};
+}
+
+function updateDashboard() {
+  const t = getTodayTotals();
+  const tdee = settings.tdee || 0;
+  const bal = t.net - tdee;
+  $('todayIntake').textContent  = t.intake;
+  $('todayOuttake').textContent = t.outtake;
+  $('todayNet').textContent     = t.net;
+  const balEl = $('todayBalance');
+  balEl.textContent = (bal>=0?'+':'') + Math.round(bal);
+  balEl.className = 'stat-val ' + (bal > 0 ? 'over' : 'under');
+  const pct = tdee > 0 ? Math.min((t.net/tdee)*100,100) : 0;
+  $('netBar').style.width = pct + '%';
+  $('netBar').style.background = bal > 0 ? 'var(--red)' : 'var(--navy)';
+  $('netBarLabel').textContent = `${t.net} / ${tdee} kcal`;
+  $('todayProtein').textContent  = t.protein+'g';
+  $('todayCarbs').textContent    = t.carbs+'g';
+  $('todayFat').textContent      = t.fat+'g';
+  $('todayMacrosCal').textContent = Math.round(t.protein*4+t.carbs*4+t.fat*9);
+  const total = t.protein+t.carbs+t.fat;
+  $('barProtein').style.width = total>0?(t.protein/total*100)+'%':'0%';
+  $('barCarbs').style.width   = total>0?(t.carbs/total*100)+'%':'0%';
+  $('barFat').style.width     = total>0?(t.fat/total*100)+'%':'0%';
+  $('valProtein').textContent = t.protein+'g';
+  $('valCarbs').textContent   = t.carbs+'g';
+  $('valFat').textContent     = t.fat+'g';
+  updatePrediction();
+  $('no-settings-warning').style.display = settings.tdee ? 'none' : 'block';
+}
+
+function updatePrediction() {
+  if (!settings.weight||!settings.targetWeight||!settings.tdee) {
+    $('predDays').textContent='—';$('predDetail').textContent='กรุณาตั้งค่า Settings ก่อน';$('predDate').textContent='';return;
+  }
+  const diff = settings.weight - settings.targetWeight;
+  if (Math.abs(diff)<0.1) {$('predDays').textContent='🎉';$('predDetail').textContent='คุณถึง Target Weight แล้ว!';$('predDate').textContent='';return;}
+  let totalDef=0,cnt=0;
+  getLastNDays(7).forEach(d => {
+    const meals=logs[d]||[];let i=0,o=0;
+    meals.forEach(m=>{if(m.type==='intake')i+=m.cal;else o+=m.cal;});
+    if(i>0||o>0){totalDef+=settings.tdee-(i-o);cnt++;}
+  });
+  let avg = cnt>0?totalDef/cnt:settings.tdee-getTodayTotals().net;
+  if(avg===0)avg=0.01;
+  const kcal=diff*7700;
+  if(diff>0&&avg<=0){$('predDays').textContent='∞';$('predDetail').textContent='Net มากกว่า TDEE';$('predDate').textContent='';return;}
+  if(diff<0&&avg>=0){$('predDays').textContent='∞';$('predDetail').textContent='Net น้อยกว่า TDEE';$('predDate').textContent='';return;}
+  const days=Math.abs(Math.round(kcal/avg));
+  const td=new Date();td.setDate(td.getDate()+days);
+  $('predDays').textContent=days;
+  $('predDetail').textContent=`${diff>0?'ลด':'เพิ่ม'} ${Math.abs(diff).toFixed(1)}kg · เฉลี่ย ${Math.abs(Math.round(avg))} kcal/วัน`;
+  $('predDate').textContent='🎯 '+td.toLocaleDateString('th-TH',{year:'numeric',month:'long',day:'numeric'});
+}
+
+// ── CHARTS ──
+document.querySelectorAll('.chart-btn').forEach(btn => {
+  btn.onclick = () => {
+    chartRange = parseInt(btn.dataset.range);
+    document.querySelectorAll('.chart-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    renderCharts();
+  };
+});
+
+function renderCharts() {
+  const dates=getLastNDays(chartRange);
+  const labels=dates.map(d=>new Date(d).toLocaleDateString('th-TH',{month:'short',day:'numeric'}));
+  const iData=[],oData=[],nData=[],pData=[],cData=[],fData=[];
+  dates.forEach(d=>{
+    const meals=logs[d]||[];let i=0,o=0,p=0,c=0,f=0;
+    meals.forEach(m=>{if(m.type==='intake'){i+=m.cal;p+=m.protein;c+=m.carbs;f+=m.fat;}else o+=m.cal;});
+    iData.push(i);oData.push(o);nData.push(i-o);pData.push(p);cData.push(c);fData.push(f);
+  });
+  const axis={ticks:{color:'#8a7f6e',font:{family:'DM Mono',size:10}},grid:{color:'rgba(0,48,73,0.07)'}};
+  const legend={labels:{color:'#003049',font:{family:'DM Sans',size:11,weight:'600'}}};
+  if(currentChart)currentChart.destroy();
+  currentChart=new Chart($('mainChart').getContext('2d'),{
+    type:'bar',
+    data:{labels,datasets:[
+      {label:'Intake',data:iData,backgroundColor:'rgba(247,127,0,0.75)',borderColor:'#F77F00',borderWidth:1,borderRadius:4},
+      {label:'Outtake',data:oData,backgroundColor:'rgba(214,40,40,0.75)',borderColor:'#D62828',borderWidth:1,borderRadius:4},
+      {label:'Net',data:nData,type:'line',borderColor:'#003049',backgroundColor:'rgba(0,48,73,0.08)',borderWidth:2.5,pointBackgroundColor:'#003049',pointRadius:4,tension:0.3,fill:true}
+    ]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend},scales:{x:axis,y:axis}}
+  });
+  if(macroChart)macroChart.destroy();
+  macroChart=new Chart($('macroChart').getContext('2d'),{
+    type:'line',
+    data:{labels,datasets:[
+      {label:'Protein (g)',data:pData,borderColor:'#D62828',backgroundColor:'rgba(214,40,40,0.07)',borderWidth:2,pointRadius:3,tension:0.3,fill:true},
+      {label:'Carbs (g)',data:cData,borderColor:'#F77F00',backgroundColor:'rgba(247,127,0,0.07)',borderWidth:2,pointRadius:3,tension:0.3,fill:true},
+      {label:'Fat (g)',data:fData,borderColor:'#FCBF49',backgroundColor:'rgba(252,191,73,0.1)',borderWidth:2,pointRadius:3,tension:0.3,fill:true},
+    ]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend},scales:{x:axis,y:axis}}
+  });
+}
+
+$('currentDate').textContent = new Date().toLocaleDateString('th-TH',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+</script>
+</body>
+</html>
